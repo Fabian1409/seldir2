@@ -6,7 +6,7 @@ To change the current directory of the shell you need a wrapper around seldir
 
 ### fish
 ```fish
-function sd2f
+function sd
     seldir $argv
     cd (cat /tmp/seldir)
 end
