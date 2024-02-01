@@ -275,15 +275,14 @@ fn ui(f: &mut Frame, app: &mut App) {
         .split(f.size());
 
     let current_dir = env::current_dir().unwrap();
-    let path = Span::styled(current_dir.to_str().unwrap(), Style::default());
-    let selection = Span::styled(
+    let path = Span::from(current_dir.to_str().unwrap());
+    let selection = Span::from(
         app.center
             .selected()
             .unwrap()
             .file_name()
             .into_string()
             .unwrap(),
-        Style::default().fg(Color::Red),
     );
     f.render_widget(
         Paragraph::new(Line::from(vec![path, Span::raw("/"), selection])),
