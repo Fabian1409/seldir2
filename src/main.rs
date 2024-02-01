@@ -8,6 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use clap::{arg, command};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{prelude::*, widgets::*};
 
@@ -112,16 +113,17 @@ struct App {
     center: StatefulList<DirEntry>,
     right: StatefulList<DirEntry>,
     mode: Mode,
+    show_hidden: bool,
 }
 
 impl App {
-    fn new() -> App {
+    fn new(show_hidden: bool) -> App {
         let current_dir = env::current_dir().unwrap();
-        let left_items = read_dir_sorted(current_dir.parent().unwrap(), false);
-        let center_items = read_dir_sorted(&current_dir, false);
+        let left_items = read_dir_sorted(current_dir.parent().unwrap(), show_hidden);
+        let center_items = read_dir_sorted(&current_dir, show_hidden);
         let right_items = read_dir_sorted(
             &current_dir.join(center_items.first().unwrap().path()),
-            false,
+            show_hidden,
         );
         let left_selected = left_items
             .iter()
@@ -132,13 +134,14 @@ impl App {
             center: StatefulList::with_items(center_items, Some(0)),
             right: StatefulList::with_items(right_items, None),
             mode: Mode::Normal,
+            show_hidden,
         }
     }
 
     fn cd(&mut self) {
         let current_dir = env::current_dir().unwrap();
-        let left_items = read_dir_sorted(current_dir.parent().unwrap(), false);
-        let center_items = read_dir_sorted(&current_dir, false);
+        let left_items = read_dir_sorted(current_dir.parent().unwrap(), self.show_hidden);
+        let center_items = read_dir_sorted(&current_dir, self.show_hidden);
         let right_items = read_dir_sorted(
             &current_dir.join(
                 center_items
@@ -146,7 +149,7 @@ impl App {
                     .unwrap_or(center_items.first().unwrap())
                     .path(),
             ),
-            false,
+            self.show_hidden,
         );
         let left_selected = left_items
             .iter()
@@ -159,13 +162,7 @@ impl App {
     fn update(&mut self) {
         let current_dir = env::current_dir().unwrap();
         let right_items = read_dir_sorted(
-            &current_dir.join(
-                self.center
-                    .items
-                    .get(self.center.state.selected().unwrap())
-                    .unwrap_or(self.center.items.first().unwrap())
-                    .path(),
-            ),
+            &current_dir.join(self.center.selected().unwrap().path()),
             false,
         );
         self.right = StatefulList::with_items(right_items, None);
@@ -224,13 +221,9 @@ fn run_app<B: Backend>(
                                 }
                                 KeyCode::Right | KeyCode::Char('l') => {
                                     env::set_current_dir(
-                                        env::current_dir().unwrap().join(
-                                            app.center
-                                                .items
-                                                .get(app.center.state.selected().unwrap())
-                                                .unwrap()
-                                                .path(),
-                                        ),
+                                        env::current_dir()
+                                            .unwrap()
+                                            .join(app.center.selected().unwrap().path()),
                                     )
                                     .unwrap();
                                     app.cd()
@@ -285,8 +278,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     let path = Span::styled(current_dir.to_str().unwrap(), Style::default());
     let selection = Span::styled(
         app.center
-            .items
-            .get(app.center.state.selected().unwrap())
+            .selected()
             .unwrap()
             .file_name()
             .into_string()
@@ -303,7 +295,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         .constraints([
             Constraint::Percentage(20),
             Constraint::Percentage(30),
-            Constraint::Percentage(40),
+            Constraint::Percentage(30),
         ])
         .split(chunks[1]);
     let left_items: Vec<ListItem> = app
@@ -348,6 +340,14 @@ fn ui(f: &mut Frame, app: &mut App) {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let matches = command!()
+        .arg(arg!(
+            -a --all "Show hidden files"
+        ))
+        .get_matches();
+
+    let show_hidden = *matches.get_one::<bool>("all").unwrap();
+
     let mut file = OpenOptions::new()
         .create(true)
         .write(true)
@@ -365,7 +365,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         },
     )?;
     let tick_rate = Duration::from_millis(200);
-    let app = App::new();
+    let app = App::new(show_hidden);
 
     run_app(&mut terminal, app, tick_rate)?;
 
