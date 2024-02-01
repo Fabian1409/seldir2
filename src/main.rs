@@ -304,7 +304,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         .iter()
         .map(|item| {
             ListItem::new(String::from(" ") + item.file_name().to_str().unwrap())
-                .style(Style::default().fg(Color::Red).bg(Color::Black))
+                .style(Style::default().fg(Color::Red))
         })
         .collect();
     let center_items: Vec<ListItem> = app
@@ -313,7 +313,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         .iter()
         .map(|item| {
             ListItem::new(String::from(" ") + item.file_name().to_str().unwrap())
-                .style(Style::default().fg(Color::Red).bg(Color::Black))
+                .style(Style::default().fg(Color::Red))
         })
         .collect();
     let right_items: Vec<ListItem> = app
@@ -322,7 +322,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         .iter()
         .map(|item| {
             ListItem::new(String::from(" ") + item.file_name().to_str().unwrap())
-                .style(Style::default().fg(Color::Red).bg(Color::Black))
+                .style(Style::default().fg(Color::Red))
         })
         .collect();
 
