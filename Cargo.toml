@@ -1,5 +1,5 @@
 [package]
-name = "seldir2"
+name = "seldir"
 version = "0.1.0"
 edition = "2021"
 description = "A directory selection tui written in Rust"
