@@ -14,7 +14,7 @@ end
 ```
 
 ### bash/zsh
-```
+```bash
 function sd {
 	seldir $@
 	cd $(cat /tmp/seldir)
