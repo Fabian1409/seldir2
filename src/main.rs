@@ -78,7 +78,6 @@ fn read_dir_sorted(path: &Path, show_hidden: bool) -> Vec<DirEntry> {
                 .filter(|x| {
                     !x.path().symlink_metadata().unwrap().is_symlink()
                         && (show_hidden || !x.file_name().to_string_lossy().starts_with('.'))
-                        && x.metadata().unwrap().is_dir()
                 })
                 .collect::<Vec<_>>();
             entries.sort_by(|a, b| {
@@ -114,10 +113,11 @@ struct App {
     right: StatefulList<DirEntry>,
     mode: Mode,
     show_hidden: bool,
+    show_icons: bool,
 }
 
 impl App {
-    fn new(show_hidden: bool) -> App {
+    fn new(show_hidden: bool, show_icons: bool) -> App {
         let current_dir = env::current_dir().unwrap();
         let left_items = read_dir_sorted(current_dir.parent().unwrap(), show_hidden);
         let center_items = read_dir_sorted(&current_dir, show_hidden);
@@ -135,6 +135,7 @@ impl App {
             right: StatefulList::with_items(right_items, None),
             mode: Mode::Normal,
             show_hidden,
+            show_icons,
         }
     }
 
@@ -268,6 +269,16 @@ fn run_app<B: Backend>(
     }
 }
 
+fn into_list_item<'a>(dir_entry: &DirEntry) -> ListItem<'a> {
+    if dir_entry.metadata().unwrap().is_dir() {
+        ListItem::new(String::from("   ") + dir_entry.file_name().to_str().unwrap())
+            .style(Style::default().fg(Color::Red))
+    } else {
+        ListItem::new(String::from(" 󰈔  ") + dir_entry.file_name().to_str().unwrap())
+            .style(Style::default().fg(Color::White))
+    }
+}
+
 fn ui(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -297,33 +308,10 @@ fn ui(f: &mut Frame, app: &mut App) {
             Constraint::Percentage(30),
         ])
         .split(chunks[1]);
-    let left_items: Vec<ListItem> = app
-        .left
-        .items
-        .iter()
-        .map(|item| {
-            ListItem::new(String::from(" ") + item.file_name().to_str().unwrap())
-                .style(Style::default().fg(Color::Red))
-        })
-        .collect();
-    let center_items: Vec<ListItem> = app
-        .center
-        .items
-        .iter()
-        .map(|item| {
-            ListItem::new(String::from(" ") + item.file_name().to_str().unwrap())
-                .style(Style::default().fg(Color::Red))
-        })
-        .collect();
-    let right_items: Vec<ListItem> = app
-        .right
-        .items
-        .iter()
-        .map(|item| {
-            ListItem::new(String::from(" ") + item.file_name().to_str().unwrap())
-                .style(Style::default().fg(Color::Red))
-        })
-        .collect();
+
+    let left_items: Vec<ListItem> = app.left.items.iter().map(into_list_item).collect();
+    let center_items: Vec<ListItem> = app.center.items.iter().map(into_list_item).collect();
+    let right_items: Vec<ListItem> = app.right.items.iter().map(into_list_item).collect();
 
     let left_items = List::new(left_items)
         .highlight_style(Style::default().reversed())
@@ -340,12 +328,12 @@ fn ui(f: &mut Frame, app: &mut App) {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let matches = command!()
-        .arg(arg!(
-            -a --all "Show hidden files"
-        ))
+        .arg(arg!(-a --all "Show hidden files"))
+        .arg(arg!(-i --icons "Show icons"))
         .get_matches();
 
     let show_hidden = *matches.get_one::<bool>("all").unwrap();
+    let show_icons = *matches.get_one::<bool>("icons").unwrap();
 
     let mut file = OpenOptions::new()
         .create(true)
@@ -354,6 +342,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .open("/tmp/seldir")
         .unwrap();
     write!(file, "{}", env::current_dir().unwrap().to_str().unwrap()).unwrap();
+
     crossterm::terminal::enable_raw_mode()?;
     let stdout = io::stdout();
     let backend = CrosstermBackend::new(stdout);
@@ -364,7 +353,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         },
     )?;
     let tick_rate = Duration::from_millis(200);
-    let app = App::new(show_hidden);
+    let app = App::new(show_hidden, show_icons);
 
     run_app(&mut terminal, app, tick_rate)?;
 
