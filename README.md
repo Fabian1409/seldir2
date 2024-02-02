@@ -8,7 +8,7 @@ Add the seldir binary to `$PATH` by placing it in `~/.cargo/bin`
 ### fish
 ```fish
 function sd
-    seldir $argv
+    seldir --icons --color red $argv
     cd (cat /tmp/seldir)
 end
 ```
@@ -16,7 +16,7 @@ end
 ### bash/zsh
 ```bash
 function sd {
-    seldir $@
+    seldir --icons --color red $@
     cd $(cat /tmp/seldir)
 }
 ```

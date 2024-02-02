@@ -4,7 +4,8 @@ use std::{
     error::Error,
     fs::{self, DirEntry, OpenOptions},
     io::{self, Write},
-    path::Path,
+    path::{Path, PathBuf},
+    str::FromStr,
     time::{Duration, Instant},
 };
 
@@ -34,31 +35,17 @@ impl<T> StatefulList<T> {
     }
 
     fn next(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i < self.items.len() - 1 {
-                    i + 1
-                } else {
-                    i
-                }
-            }
-            None => 0,
-        };
-        self.state.select(Some(i));
+        let i = self.state.selected().unwrap_or(0);
+        if i < self.items.len() - 1 {
+            self.state.select(Some(i + 1))
+        }
     }
 
     fn previous(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i != 0 {
-                    i - 1
-                } else {
-                    0
-                }
-            }
-            None => 0,
-        };
-        self.state.select(Some(i));
+        let i = self.state.selected().unwrap_or(0);
+        if i > 0 {
+            self.state.select(Some(i - 1));
+        }
     }
 
     fn first(&mut self) {
@@ -114,50 +101,54 @@ struct App {
     mode: Mode,
     show_hidden: bool,
     show_icons: bool,
+    accent: Color,
 }
 
 impl App {
-    fn new(show_hidden: bool, show_icons: bool) -> App {
+    fn new(show_hidden: bool, show_icons: bool, accent: Color) -> App {
         let current_dir = env::current_dir().unwrap();
-        let left_items = read_dir_sorted(current_dir.parent().unwrap(), show_hidden);
-        let center_items = read_dir_sorted(&current_dir, show_hidden);
-        let right_items = read_dir_sorted(
-            &current_dir.join(center_items.first().unwrap().path()),
+        let left = read_dir_sorted(current_dir.parent().unwrap(), show_hidden);
+        let center = read_dir_sorted(&current_dir, show_hidden);
+        let right = read_dir_sorted(
+            &current_dir.join(center.first().unwrap().path()),
             show_hidden,
         );
-        let left_selected = left_items
-            .iter()
-            .position(|x| x.path().eq(current_dir.as_path()));
+        let left_selected = left.iter().position(|x| x.path().eq(current_dir.as_path()));
 
         App {
-            left: StatefulList::with_items(left_items, left_selected),
-            center: StatefulList::with_items(center_items, Some(0)),
-            right: StatefulList::with_items(right_items, None),
+            left: StatefulList::with_items(left, left_selected),
+            center: StatefulList::with_items(center, Some(0)),
+            right: StatefulList::with_items(right, None),
             mode: Mode::Normal,
             show_hidden,
             show_icons,
+            accent,
         }
     }
 
-    fn cd(&mut self) {
+    fn cd(&mut self, leaving: Option<PathBuf>) {
         let current_dir = env::current_dir().unwrap();
-        let left_items = read_dir_sorted(current_dir.parent().unwrap(), self.show_hidden);
-        let center_items = read_dir_sorted(&current_dir, self.show_hidden);
-        let right_items = read_dir_sorted(
+        let left = read_dir_sorted(current_dir.parent().unwrap(), self.show_hidden);
+        let center = read_dir_sorted(&current_dir, self.show_hidden);
+        let right = read_dir_sorted(
             &current_dir.join(
-                center_items
+                center
                     .get(self.center.state.selected().unwrap())
-                    .unwrap_or(center_items.first().unwrap())
+                    .unwrap_or(center.first().unwrap())
                     .path(),
             ),
             self.show_hidden,
         );
-        let left_selected = left_items
-            .iter()
-            .position(|x| x.path().eq(current_dir.as_path()));
-        self.left = StatefulList::with_items(left_items, left_selected);
-        self.center = StatefulList::with_items(center_items, Some(0));
-        self.right = StatefulList::with_items(right_items, None);
+        let left_selected = left.iter().position(|x| x.path().eq(current_dir.as_path()));
+        let center_selected = if let Some(path) = leaving {
+            let idx = center.iter().position(|x| x.path().eq(&path)).unwrap();
+            Some(idx)
+        } else {
+            Some(0)
+        };
+        self.left = StatefulList::with_items(left, left_selected);
+        self.center = StatefulList::with_items(center, center_selected);
+        self.right = StatefulList::with_items(right, None);
     }
 
     fn update(&mut self) {
@@ -214,11 +205,12 @@ fn run_app<B: Backend>(
                                 KeyCode::Char('g') => app.center.first(),
                                 KeyCode::Char('G') => app.center.last(),
                                 KeyCode::Left | KeyCode::Char('h') => {
+                                    let leaving = env::current_dir().unwrap().to_path_buf();
                                     env::set_current_dir(
                                         env::current_dir().unwrap().parent().unwrap(),
                                     )
                                     .unwrap();
-                                    app.cd()
+                                    app.cd(Some(leaving));
                                 }
                                 KeyCode::Right | KeyCode::Char('l') => {
                                     env::set_current_dir(
@@ -227,7 +219,7 @@ fn run_app<B: Backend>(
                                             .join(app.center.selected().unwrap().path()),
                                     )
                                     .unwrap();
-                                    app.cd()
+                                    app.cd(None);
                                 }
                                 KeyCode::Char('f') => app.mode = Mode::Find,
                                 KeyCode::Char('q') | KeyCode::Enter => {
@@ -269,13 +261,14 @@ fn run_app<B: Backend>(
     }
 }
 
-fn into_list_item<'a>(dir_entry: &DirEntry) -> ListItem<'a> {
+fn into_list_item<'a>(dir_entry: &DirEntry, accent: Color, show_icons: bool) -> ListItem<'a> {
+    let dir_icon = if show_icons { "   " } else { " " };
+    let file_icon = if show_icons { "   " } else { " " };
     if dir_entry.metadata().unwrap().is_dir() {
-        ListItem::new(String::from("   ") + dir_entry.file_name().to_str().unwrap())
-            .style(Style::default().fg(Color::Red))
+        ListItem::new(dir_icon.to_owned() + dir_entry.file_name().to_str().unwrap())
+            .style(Style::default().fg(accent))
     } else {
-        ListItem::new(String::from(" 󰈔  ") + dir_entry.file_name().to_str().unwrap())
-            .style(Style::default().fg(Color::White))
+        ListItem::new(file_icon.to_owned() + dir_entry.file_name().to_str().unwrap())
     }
 }
 
@@ -309,31 +302,51 @@ fn ui(f: &mut Frame, app: &mut App) {
         ])
         .split(chunks[1]);
 
-    let left_items: Vec<ListItem> = app.left.items.iter().map(into_list_item).collect();
-    let center_items: Vec<ListItem> = app.center.items.iter().map(into_list_item).collect();
-    let right_items: Vec<ListItem> = app.right.items.iter().map(into_list_item).collect();
+    let left: Vec<ListItem> = app
+        .left
+        .items
+        .iter()
+        .map(|x| into_list_item(x, app.accent, app.show_icons))
+        .collect();
+    let center: Vec<ListItem> = app
+        .center
+        .items
+        .iter()
+        .map(|x| into_list_item(x, app.accent, app.show_icons))
+        .collect();
+    let right: Vec<ListItem> = app
+        .right
+        .items
+        .iter()
+        .map(|x| into_list_item(x, app.accent, app.show_icons))
+        .collect();
 
-    let left_items = List::new(left_items)
+    let left = List::new(left)
         .highlight_style(Style::default().reversed())
         .block(Block::default().padding(Padding::new(0, 1, 0, 0)));
-    let center_items = List::new(center_items)
+    let center = List::new(center)
         .highlight_style(Style::default().reversed())
         .block(Block::default().padding(Padding::new(0, 1, 0, 0)));
-    let right_items = List::new(right_items).highlight_style(Style::default().reversed());
+    let right = List::new(right).highlight_style(Style::default().reversed());
 
-    f.render_stateful_widget(left_items, chunks[0], &mut app.left.state);
-    f.render_stateful_widget(center_items, chunks[1], &mut app.center.state);
-    f.render_stateful_widget(right_items, chunks[2], &mut app.right.state);
+    f.render_stateful_widget(left, chunks[0], &mut app.left.state);
+    f.render_stateful_widget(center, chunks[1], &mut app.center.state);
+    f.render_stateful_widget(right, chunks[2], &mut app.right.state);
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let matches = command!()
         .arg(arg!(-a --all "Show hidden files"))
         .arg(arg!(-i --icons "Show icons"))
+        .arg(arg!(-c --color <COLOR> "Accent color"))
         .get_matches();
 
     let show_hidden = *matches.get_one::<bool>("all").unwrap();
     let show_icons = *matches.get_one::<bool>("icons").unwrap();
+    let accent = matches
+        .get_one::<String>("color")
+        .unwrap_or(&"red".to_owned())
+        .clone();
 
     let mut file = OpenOptions::new()
         .create(true)
@@ -353,7 +366,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         },
     )?;
     let tick_rate = Duration::from_millis(200);
-    let app = App::new(show_hidden, show_icons);
+    let app = App::new(show_hidden, show_icons, Color::from_str(&accent)?);
 
     run_app(&mut terminal, app, tick_rate)?;
 
