@@ -1,14 +1,14 @@
 use std::{
     cmp::Ordering,
     env,
-    error::Error,
     fs::{self, DirEntry, OpenOptions},
     io::{self, Write},
-    path::{Path, PathBuf},
+    path::Path,
     str::FromStr,
     time::{Duration, Instant},
 };
 
+use anyhow::Result;
 use clap::{arg, command};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{prelude::*, widgets::*};
@@ -126,38 +126,38 @@ impl App {
         }
     }
 
-    fn cd(&mut self, leaving: Option<PathBuf>) {
-        let current_dir = env::current_dir().unwrap();
-        let left = read_dir_sorted(current_dir.parent().unwrap(), self.show_hidden);
-        let center = read_dir_sorted(&current_dir, self.show_hidden);
-        let right = read_dir_sorted(
-            &current_dir.join(
-                center
-                    .get(self.center.state.selected().unwrap())
-                    .unwrap_or(center.first().unwrap())
-                    .path(),
-            ),
-            self.show_hidden,
-        );
-        let left_selected = left.iter().position(|x| x.path().eq(current_dir.as_path()));
-        let center_selected = if let Some(path) = leaving {
-            let idx = center.iter().position(|x| x.path().eq(&path)).unwrap();
-            Some(idx)
-        } else {
-            Some(0)
-        };
+    fn enter(&mut self, path: &Path) {
+        env::set_current_dir(path).unwrap();
+        let left = read_dir_sorted(path.parent().unwrap(), self.show_hidden);
+        let center = read_dir_sorted(path, self.show_hidden);
+        let left_selected = left.iter().position(|x| x.path().eq(path));
         self.left = StatefulList::with_items(left, left_selected);
-        self.center = StatefulList::with_items(center, center_selected);
-        self.right = StatefulList::with_items(right, None);
+        self.center = StatefulList::with_items(center, Some(0));
     }
 
-    fn update(&mut self) {
+    fn leave(&mut self) {
+        let leaving = env::current_dir().unwrap();
+        if let Some(path) = leaving.parent() {
+            env::set_current_dir(path).unwrap();
+            let left = if let Some(parent) = path.parent() {
+                read_dir_sorted(parent, self.show_hidden)
+            } else {
+                Vec::new()
+            };
+            let center = read_dir_sorted(path, self.show_hidden);
+            let left_selected = left.iter().position(|x| x.path().eq(path));
+            let center_selcted = center.iter().position(|x| x.path().eq(leaving.as_path()));
+            self.left = StatefulList::with_items(left, left_selected);
+            self.center = StatefulList::with_items(center, center_selcted);
+        }
+    }
+
+    fn update_right(&mut self) {
         let current_dir = env::current_dir().unwrap();
-        let right_items = read_dir_sorted(
-            &current_dir.join(self.center.selected().unwrap().path()),
-            false,
-        );
-        self.right = StatefulList::with_items(right_items, None);
+        if let Some(selected) = self.center.selected() {
+            let right = read_dir_sorted(&current_dir.join(selected.path()), self.show_hidden);
+            self.right = StatefulList::with_items(right, None);
+        }
     }
 }
 
@@ -165,7 +165,7 @@ fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
     mut app: App,
     tick_rate: Duration,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     let mut last_tick = Instant::now();
     loop {
         terminal.draw(|f| ui(f, &mut app))?;
@@ -180,7 +180,7 @@ fn run_app<B: Backend>(
                                 KeyCode::Esc => return Ok(()),
                                 KeyCode::Down | KeyCode::Char('j') => {
                                     app.center.next();
-                                    app.update();
+                                    app.update_right();
                                 }
                                 KeyCode::Char('J') => {
                                     app.center.next();
@@ -188,11 +188,11 @@ fn run_app<B: Backend>(
                                     app.center.next();
                                     app.center.next();
                                     app.center.next();
-                                    app.update();
+                                    app.update_right();
                                 }
                                 KeyCode::Up | KeyCode::Char('k') => {
                                     app.center.previous();
-                                    app.update();
+                                    app.update_right();
                                 }
                                 KeyCode::Char('K') => {
                                     app.center.previous();
@@ -200,34 +200,31 @@ fn run_app<B: Backend>(
                                     app.center.previous();
                                     app.center.previous();
                                     app.center.previous();
-                                    app.update();
+                                    app.update_right();
                                 }
                                 KeyCode::Char('g') => app.center.first(),
                                 KeyCode::Char('G') => app.center.last(),
                                 KeyCode::Left | KeyCode::Char('h') => {
-                                    let leaving = env::current_dir().unwrap().to_path_buf();
-                                    env::set_current_dir(
-                                        env::current_dir().unwrap().parent().unwrap(),
-                                    )
-                                    .unwrap();
-                                    app.cd(Some(leaving));
+                                    app.leave();
+                                    app.update_right();
                                 }
                                 KeyCode::Right | KeyCode::Char('l') => {
-                                    env::set_current_dir(
-                                        env::current_dir()
-                                            .unwrap()
-                                            .join(app.center.selected().unwrap().path()),
-                                    )
-                                    .unwrap();
-                                    app.cd(None);
+                                    if let Some(selected) = app.center.selected() {
+                                        if selected.path().is_dir() {
+                                            app.enter(&selected.path());
+                                            app.update_right();
+                                        }
+                                    }
                                 }
                                 KeyCode::Char('f') => app.mode = Mode::Find,
                                 KeyCode::Char('q') | KeyCode::Enter => {
-                                    fs::write(
-                                        "/tmp/seldir",
-                                        app.center.selected().unwrap().path().to_str().unwrap(),
-                                    )?;
-                                    return Ok(());
+                                    if let Some(selected) = app.center.selected() {
+                                        let path = selected.path();
+                                        if path.is_dir() {
+                                            fs::write("/tmp/seldir", path.to_str().unwrap())?;
+                                            return Ok(());
+                                        }
+                                    }
                                 }
                                 _ => {}
                             }
@@ -243,7 +240,7 @@ fn run_app<B: Backend>(
                                     }) {
                                         app.center.state.select(Some(idx));
                                     }
-                                    app.update();
+                                    app.update_right();
                                 }
                             }
 
@@ -279,17 +276,17 @@ fn ui(f: &mut Frame, app: &mut App) {
         .split(f.size());
 
     let current_dir = env::current_dir().unwrap();
-    let path = Span::from(current_dir.to_str().unwrap());
-    let selection = Span::from(
-        app.center
-            .selected()
-            .unwrap()
-            .file_name()
-            .into_string()
-            .unwrap(),
-    );
+    let mut path = current_dir.to_str().unwrap().to_owned();
+    if !path.ends_with('/') {
+        path += "/";
+    }
+    let selection = if let Some(selected) = app.center.selected() {
+        Span::from(selected.file_name().into_string().unwrap())
+    } else {
+        Span::default()
+    };
     f.render_widget(
-        Paragraph::new(Line::from(vec![path, Span::raw("/"), selection])),
+        Paragraph::new(Line::from(vec![Span::raw(path), selection])),
         chunks[0],
     );
 
@@ -334,7 +331,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     f.render_stateful_widget(right, chunks[2], &mut app.right.state);
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<()> {
     let matches = command!()
         .arg(arg!(-a --all "Show hidden files"))
         .arg(arg!(-i --icons "Show icons"))
@@ -362,7 +359,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::with_options(
         backend,
         TerminalOptions {
-            viewport: Viewport::Inline(12),
+            viewport: Viewport::Inline(16),
         },
     )?;
     let tick_rate = Duration::from_millis(200);
