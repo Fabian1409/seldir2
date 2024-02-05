@@ -107,12 +107,17 @@ struct App {
 impl App {
     fn new(show_hidden: bool, show_icons: bool, accent: Color) -> App {
         let current_dir = env::current_dir().unwrap();
-        let left = read_dir_sorted(current_dir.parent().unwrap(), show_hidden);
+        let left = if let Some(parent) = current_dir.parent() {
+            read_dir_sorted(parent, show_hidden)
+        } else {
+            Vec::new()
+        };
         let center = read_dir_sorted(&current_dir, show_hidden);
-        let right = read_dir_sorted(
-            &current_dir.join(center.first().unwrap().path()),
-            show_hidden,
-        );
+        let right = if let Some(selected) = center.first() {
+            read_dir_sorted(&current_dir.join(selected.path()), show_hidden)
+        } else {
+            Vec::new()
+        };
         let left_selected = left.iter().position(|x| x.path().eq(current_dir.as_path()));
 
         App {
