@@ -91,7 +91,8 @@ fn read_dir_sorted(path: &Path, show_hidden: bool) -> Vec<DirEntry> {
 #[derive(Debug)]
 enum Mode {
     Normal,
-    Find,
+    FindForwards,
+    FindBackwards,
 }
 
 struct App {
@@ -151,9 +152,9 @@ impl App {
             };
             let center = read_dir_sorted(path, self.show_hidden);
             let left_selected = left.iter().position(|x| x.path().eq(path));
-            let center_selcted = center.iter().position(|x| x.path().eq(leaving.as_path()));
+            let center_selected = center.iter().position(|x| x.path().eq(leaving.as_path()));
             self.left = StatefulList::with_items(left, left_selected);
-            self.center = StatefulList::with_items(center, center_selcted);
+            self.center = StatefulList::with_items(center, center_selected);
         }
     }
 
@@ -221,7 +222,8 @@ fn run_app<B: Backend>(
                                         }
                                     }
                                 }
-                                KeyCode::Char('f') => app.mode = Mode::Find,
+                                KeyCode::Char('f') => app.mode = Mode::FindForwards,
+                                KeyCode::Char('F') => app.mode = Mode::FindBackwards,
                                 KeyCode::Char('q') | KeyCode::Enter => {
                                     if let Some(selected) = app.center.selected() {
                                         let path = selected.path();
@@ -235,18 +237,44 @@ fn run_app<B: Backend>(
                             }
                         } else {
                             if let KeyCode::Char(c) = key.code {
-                                if let Mode::Find = app.mode {
-                                    if let Some(idx) = app.center.items.iter().position(|x| {
-                                        x.file_name()
-                                            .into_string()
-                                            .unwrap()
-                                            .to_lowercase()
-                                            .starts_with(c)
-                                    }) {
-                                        app.center.state.select(Some(idx));
+                                match app.mode {
+                                    Mode::FindForwards => {
+                                        let start =
+                                            app.center.state.selected().unwrap_or_default() + 1;
+                                        if let Some(idx) =
+                                            app.center.items.iter().skip(start).position(|x| {
+                                                x.file_name()
+                                                    .into_string()
+                                                    .unwrap()
+                                                    .to_lowercase()
+                                                    .starts_with(c)
+                                            })
+                                        {
+                                            app.center.state.select(Some(idx + start));
+                                        }
                                     }
-                                    app.update_right();
+                                    Mode::FindBackwards => {
+                                        let start = app.center.state.selected().unwrap_or_default();
+                                        if let Some(idx) = app
+                                            .center
+                                            .items
+                                            .iter()
+                                            .rev()
+                                            .skip(app.center.items.len() - start)
+                                            .position(|x| {
+                                                x.file_name()
+                                                    .into_string()
+                                                    .unwrap()
+                                                    .to_lowercase()
+                                                    .starts_with(c)
+                                            })
+                                        {
+                                            app.center.state.select(Some(start - idx - 1));
+                                        }
+                                    }
+                                    Mode::Normal => {}
                                 }
+                                app.update_right();
                             }
 
                             app.mode = Mode::Normal;
